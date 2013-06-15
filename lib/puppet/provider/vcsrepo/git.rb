@@ -10,9 +10,36 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
 
   def create
     if !@resource.value(:source)
-      init_repository(@resource.value(:path))
+      init_repository
     else
-      clone_repository(@resource.value(:source), @resource.value(:path))
+      if Dir[@resource.value(:path)].empty?
+        clone_repository(@resource.value(:source), @resource.value(:path))
+      else
+        args = ['init']
+        at_path do
+          git_with_identity(*args)
+        end
+        args = ["remote add"]
+        args << @resource.value(:remote)
+        args << @resource.value(:source)
+        at_path do
+          git_with_identity(*args)
+        end
+        args = ['pull']
+        args << @resource.value(:remote)
+        if @resource.value(:revision)
+          if @resource.value(:ensure) == :bare
+            notice "Ignoring revision for bare repository"
+          else
+            args << @resource.value(:revision)
+          end
+        end
+        at_path do
+          git_with_identity(*args)
+        end
+        #git pull origin c3-vpc
+
+      end
       if @resource.value(:revision)
         if @resource.value(:ensure) == :bare
           notice "Ignoring revision for bare repository"
@@ -44,7 +71,7 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
     elsif branch == '(no branch)'
       return get_revision('HEAD')
     else
-      return get_revision("#{@resource.value(:remote)}/%s" % branch)
+      return get_revision("#{@resource.value(:remote)}/%s" % branch) unless branch == ''
     end
   end
 
@@ -94,12 +121,7 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
   end
 
   def update_remote_origin_url
-    current = git_with_identity('config', 'remote.origin.url')
-    unless @resource.value(:source).nil?
-      if current.nil? or current.strip != @resource.value(:source)
-        git_with_identity('config', 'remote.origin.url', @resource.value(:source))
-      end
-    end
+      git_with_identity('config', 'remote.origin.url', @resource.value(:source)) unless @resource.value(:source).nil?
   end
 
   def update_references
@@ -144,7 +166,7 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
     end
   end
 
-  def init_repository(path)
+  def init_repository
     check_force
     if @resource.value(:ensure) == :bare && working_copy_exists?
       convert_working_copy_to_bare
@@ -255,7 +277,7 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
   end
 
   def set_excludes
-    at_path { open('.git/info/exclude', 'w') { |f| @resource.value(:excludes).each { |ex| f.write(ex + "\n") }}}
+    at_path { open('.git/info/exclude', 'w') { |f| @resource.value(:excludes).each { |ex| f.write(ex + "\n") } } }
   end
 
   def get_revision(rev)
@@ -307,7 +329,7 @@ Puppet::Type.type(:vcsrepo).provide(:git, :parent => Puppet::Provider::Vcsrepo) 
         return ret
       end
     elsif @resource.value(:user)
-      su(@resource.value(:user), '-c', "git #{args.join(' ')}" )
+      su(@resource.value(:user), '-c', "git #{args.join(' ')}")
     else
       git(*args)
     end
